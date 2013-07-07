@@ -16,6 +16,11 @@ build-type:          Simple
 cabal-version:       >=1.8
 
 executable intriky-hs
-  -- main-is:             
-  -- other-modules:       
-  build-depends:       base ==4.5.*
+  main-is:             Main.hs
+  other-modules:       Intriky.Types
+  build-depends:       base         == 4.5.*
+                     , bytestring   == 0.9.2.*
+                     , text         == 0.11.2.*
+                     , vector       == 0.10.0.*
+  extensions:          TypeSynonymInstances
+  hs-source-dirs:      src
