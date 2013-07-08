@@ -102,12 +102,11 @@ instance IntrikyType IntrikyRecord where
 
 
 
-type IntrikyString = T.Text
+data IntrikyString = String' T.Text deriving (Eq)
 instance IntrikyType IntrikyString where
     -- Because Haskell data are immutable, the notion of having the
     -- same location in memory is meaninless. See section 6.1.
     eqv _ _ = False
--- Eq instance defined by Text.
 
 
 -- Symbols are essentiall strings in a different context. I wrapped this in 
