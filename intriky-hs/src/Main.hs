@@ -1,3 +1,5 @@
-import Intriky.Types
+import Intriky.Parser
 
-main = print ('a' `eqv` 'b')
+main = do
+    print "ahoj"
+    return ()

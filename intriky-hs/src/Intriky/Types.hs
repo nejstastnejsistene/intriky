@@ -1,6 +1,7 @@
 module Intriky.Types where
 
 import qualified Data.ByteString as B
+import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Vector as V
 
@@ -48,9 +49,19 @@ instance IntrikyType IntrikyNull where
     eqv _ _ = True
 
 
-data IntrikyNumber = Number' deriving (Eq) -- TODO
+data SpecialNum = PlusInf | MinusInf | PlusNan | MinusNan deriving (Eq)
+data NumPart
+    = Exact Rational
+    | Inexact Double
+    | Special SpecialNum
+    deriving (Eq)
+data IntrikyNumber = Number
+    { realPart :: NumPart
+    , imagPart :: NumPart
+    } deriving (Eq)
 instance IntrikyType IntrikyNumber where
     eqv = undefined
+-- TODO: (==)
 
 
 data IntrikyPair a b = Pair a b
@@ -73,11 +84,22 @@ instance IntrikyType IntrikyProcedure where
     eqv = undefined
 
 
-data IntrikyRecord = Record deriving (Eq) -- TODO
+data IntrikyRecord = IntrikyRecord
+    { recordName        :: T.Text
+    , recordConstructor :: [T.Text]
+    , recordPredicate   :: T.Text
+    , recordFields      :: [RecordField]
+    } deriving (Eq)
+data RecordField = RecordField
+    { fieldName :: T.Text
+    , accessor  :: T.Text
+    , modifier  :: T.Text
+    } deriving (Eq)
 instance IntrikyType IntrikyRecord where
     -- Because Haskell data are immutable, the notion of having the
     -- same location in memory is meaninless. See section 6.1.
     eqv _ _ = False
+
 
 
 type IntrikyString = T.Text
