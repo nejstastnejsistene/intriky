@@ -1,4 +1,4 @@
-import Intriky.Parser
+import Intriky.Lexer
 
 main = do
     print "ahoj"
