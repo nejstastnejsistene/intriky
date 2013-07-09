@@ -46,15 +46,15 @@ data Exactness = E | I
 
 -- Parses an integer from a string given a radix.
 readInteger :: Num a => Int -> String -> a
-readInteger r = readInteger' r . reverse
+readInteger r = readInteger' . reverse
   where
-    readInteger' _ [] = 0
-    readInteger' r (x:xs) = x' + r' * readInteger r xs
+    r' = fromIntegral r
+    readInteger' [] = 0
+    readInteger' (x:xs) = x' + r' * readInteger' xs
       where
-        r' = fromIntegral r
         x' = fromIntegral $ if isDigit x
                                 then ord x - ord '0'
-                                else ord (toLower x) - ord 'a'
+                                else ord (toLower x) - ord 'a' + 10
 
 -- Attempt to parse a string without consuming any input.
 tryString :: String -> Parser String
