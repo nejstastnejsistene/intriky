@@ -3,7 +3,6 @@ module Intriky.Lexer where
 import Control.Monad   (liftM)
 import Data.Char       (chr, ord, isDigit, toLower)
 import Data.Ratio      ((%), numerator, denominator)
-import Data.Word       (Word8)
 import Text.ParserCombinators.Parsec hiding
                        (digit, letter, hexDigit, label, token)
 
@@ -109,10 +108,10 @@ comment = choice
 
 nestedComment :: Parser ()
 nestedComment = try $ do
-    tryString "#|"
+    _ <- tryString "#|"
     commentText
-    many commentCont
-    tryString "|#"
+    _ <- many commentCont
+    _ <- tryString "|#"
     return ()
 
 commentText :: Parser ()
@@ -146,9 +145,9 @@ identifier = choice [regular, vert, peculiarIdentifier]
         xs <- many subsequent
         return $ IdentTok (x:xs)
     vert = try $ do
-        verticalLine
+        _ <- verticalLine
         xs <- many symbolElement
-        verticalLine
+        _ <- verticalLine
         return (IdentTok xs)
 
 initial :: Parser Char
@@ -177,9 +176,9 @@ specialSubsequent = explicitSign <|> oneOf ".@"
 
 inlineHexEscape :: Parser Char
 inlineHexEscape = try $ do
-    tryString "\\x"
+    _ <- tryString "\\x"
     x <- hexScalarValue
-    string ";"
+    _ <- char ';'
     return (chr x)
 
 hexScalarValue :: Parser Int
@@ -205,7 +204,7 @@ peculiarIdentifier = liftM IdentTok $ choice [plusMinus, noDot, withDot]
         return (x:y:zs)
     withDot = try $ do
         x <- optionMaybe explicitSign
-        char '.'
+        _ <- char '.'
         y <- dotSubsequent
         zs <- many subsequent
         let result = '.':y:zs
@@ -274,10 +273,10 @@ number = choice [num 2, num 8, num 10, num 16]
 num :: Int -> Parser IntrikyNumber
 num r = do
     p <- prefix r
-    (real, imag) <- complex r
+    (x, y) <- complex r
     case p of
-        E -> return $ Number real imag
-        I -> return $ Number (toInexact real) (toInexact imag)
+        E -> return $ Number x y
+        I -> return $ Number (toInexact x) (toInexact y)
   where
     toInexact (Exact n) = Inexact (fromIntegral x / fromIntegral y)
       where x = numerator n
@@ -288,14 +287,14 @@ num r = do
 complex :: Int -> Parser (NumPart, NumPart)
 complex r = choice [allReal, polar, special, others]
   where
-    unit = oneOf "iI"
+    unit = oneOf "iI" >> return ()
     allReal = do
         x <- real r
         return (x, Exact 0)
     polar = try $ do
-        x <- real r
-        char '@'
-        y <- real r
+        _ <- real r
+        _ <- char '@'
+        _ <- real r
         return undefined -- TODO calculate polar stuff instead
     special = try $ do
         x <- option (Exact 0) (real r)
@@ -326,7 +325,7 @@ ureal r = choice
   where
     ratioLiteral = try $ do
         x <- uinteger r
-        char '/'
+        _ <- char '/'
         y <- uinteger r
         return (x % y)
 
@@ -339,18 +338,19 @@ decimal 10 = do
   where
     whole = liftM toRational (uinteger 10)
     fractional = try $ do
-        char '.'
+        _ <- char '.'
         digits <- many1 (digit' 10)
         let x = readInteger 10 digits
             y = 10 ^ (length digits)
         return (x % y)
     both = try $ do
         before <- many1 (digit' 10)
-        char '.'
+        _ <- char '.'
         after <- many (digit' 10)
         let x = readInteger 10 (before ++ after)
             y = 10 ^ (length after)
         return (x % y)
+decimal _ = undefined
 
 -- Parses an unsigned decimal integer.
 uinteger :: Int -> Parser Integer
@@ -409,6 +409,7 @@ radix 2 = tryString "#b" >> return ()
 radix 8 = tryString "#o" >> return ()
 radix 10 = optional (tryString "#d")
 radix 16 = tryString "#d" >> return ()
+radix _ = undefined
 
 -- Parses a digit for a number with a given radix.
 digit' :: Int -> Parser Char
@@ -416,3 +417,4 @@ digit' 2 = oneOf "01"
 digit' 8 = oneOf ['0'..'7']
 digit' 10 = digit
 digit' 16 = hexDigit
+digit' _ = undefined

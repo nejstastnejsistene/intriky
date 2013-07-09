@@ -1,6 +1,7 @@
-import Text.ParserCombinators.Parsec --(parse)
-import Intriky.Lexer --(tokenize)
+import Text.ParserCombinators.Parsec (parse)
+import Intriky.Lexer (tokenize)
 
+main :: IO ()
 main = do
     life <- readFile "../life.scm"
     case parse (tokenize) "" life of

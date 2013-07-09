@@ -27,3 +27,4 @@ executable intriky-hs
                      , vector       == 0.10.0.*
   extensions:          TypeSynonymInstances
   hs-source-dirs:      src
+  ghc-options:         -Wall
