@@ -1,5 +1,8 @@
-import Intriky.Lexer
+import Text.ParserCombinators.Parsec --(parse)
+import Intriky.Lexer --(tokenize)
 
 main = do
-    print "ahoj"
-    return ()
+    life <- readFile "../life.scm"
+    case parse (tokenize) "" life of
+        Left err -> putStrLn (show err)
+        Right x -> print x
