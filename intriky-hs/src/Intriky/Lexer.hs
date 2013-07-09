@@ -13,6 +13,7 @@ module Intriky.Lexer
     , commaToken
     , seqCommaToken
     , dotToken
+    , uinteger
     ) where
 
 import Control.Monad (liftM)
@@ -25,19 +26,19 @@ import Text.ParserCombinators.Parsec hiding
 import Intriky.Types
 
 
-symbolToken :: Parser IntrikySymbol
+symbolToken :: Parser IntrikyType
 symbolToken = token (liftM (Symbol . pack) identifier)
 
-boolToken :: Parser IntrikyBoolean
+boolToken :: Parser IntrikyType
 boolToken = token boolean
 
-numberToken :: Parser IntrikyNumber
+numberToken :: Parser IntrikyType
 numberToken = token number
 
-charToken :: Parser IntrikyChar
+charToken :: Parser IntrikyType
 charToken = token character
 
-stringToken :: Parser IntrikyString
+stringToken :: Parser IntrikyType
 stringToken = token (liftM (String' . pack) string')
 
 lParenToken :: Parser ()
@@ -230,17 +231,17 @@ symbolElement = choice
     , try (string "\\|" >> char '|')
     ]
 
-boolean :: Parser IntrikyBoolean
+boolean :: Parser IntrikyType
 boolean = true <|> false
   where
-    true =  (tryString "#true" <|> tryString "#t")  >> return True
-    false = (tryString "#false" <|> tryString "#f") >> return False
+    true =  (tryString "#true" <|> tryString "#t")  >> return (Boolean True)
+    false = (tryString "#false" <|> tryString "#f") >> return (Boolean False)
 
-character :: Parser IntrikyChar
+character :: Parser IntrikyType
 character = choice
-    [ tryString "#\\" >> anyChar
-    , tryString "#\\" >> characterName
-    , tryString "#\\x" >> liftM chr hexScalarValue
+    [ tryString "#\\" >> liftM Char' anyChar
+    , tryString "#\\" >> liftM Char' characterName
+    , tryString "#\\x" >> liftM (Char' . chr) hexScalarValue
     ]
 
 characterName :: Parser Char
@@ -272,11 +273,11 @@ stringElement = choice
     ]
 
 -- Parses a number.
-number :: Parser IntrikyNumber
+number :: Parser IntrikyType
 number = choice [num 2, num 8, num 10, num 16]
 
 -- Parses a number with a given radix.
-num :: Int -> Parser IntrikyNumber
+num :: Int -> Parser IntrikyType
 num r = do
     p <- prefix r
     (x, y) <- complex r
@@ -289,8 +290,8 @@ num r = do
             y = denominator n
     toInexact x = x
 
--- Parses a complex number with a given radix.
-complex :: Int -> Parser (NumPart, NumPart)
+-- Parses a complex number with a given radix as an Exact.
+complex :: Int -> Parser (NumberPart, NumberPart)
 complex r = choice [allReal, polar, special, others]
   where
     unit = oneOf "iI" >> return ()
@@ -315,7 +316,7 @@ complex r = choice [allReal, polar, special, others]
         return (x, Exact (s y))
 
 -- Parses a signed real or a special number.
-real :: Int -> Parser NumPart
+real :: Int -> Parser NumberPart
 real r = choice
     [ try $ do s <- sign; x <- ureal r; return $ Exact (s x)
     , infnan
@@ -370,12 +371,12 @@ prefix r = choice
     ]
 
 -- Parses an infinity or NaN.
-infnan :: Parser NumPart
-infnan = liftM Special $ choice
+infnan :: Parser NumberPart
+infnan = choice
     [ tryString "+inf.0" >> return PlusInf
     , tryString "-inf.0" >> return MinusInf
-    , tryString "+nan.0" >> return PlusNan
-    , tryString "-nan.0" >> return MinusNan
+    , tryString "+nan.0" >> return Nan
+    , tryString "-nan.0" >> return Nan
     ]
 
 -- Parses an exponent suffix.

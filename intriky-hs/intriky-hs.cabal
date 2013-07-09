@@ -26,6 +26,7 @@ executable intriky-hs
                      , parsec       == 3.1.*
                      , text         == 0.11.2.*
                      , vector       == 0.10.0.*
-  extensions:          TypeSynonymInstances
+  extensions:          OverloadedStrings
+                       TypeSynonymInstances
   hs-source-dirs:      src
   ghc-options:         -Wall
