@@ -2,6 +2,7 @@ module Intriky.Parser where
 
 import qualified Data.ByteString as B
 import           Data.Ratio      (numerator, denominator)
+import           Data.Vector     (fromList)
 import           Data.Word       (Word8)
 import           Text.ParserCombinators.Parsec hiding (label)
 
@@ -10,6 +11,12 @@ import Intriky.Types
 
 parens :: Parser a -> Parser a
 parens = between lParenToken rParenToken
+
+toList :: [IntrikyType] -> IntrikyType
+toList xs = toList' xs Null
+
+toList' :: [IntrikyType] -> IntrikyType -> IntrikyType
+toList' xs y = foldr Pair y xs
 
 -- Parse a bytevector.
 bytevector :: Parser IntrikyType
@@ -36,12 +43,12 @@ datum = simpleDatum <|> compoundDatum <|> withLabel <|> labelRef
   where
     withLabel = try $ do
         x <- label
-        char '='
+        _ <- char '='
         y <- datum
         return $ Label (WithLabel x y)
     labelRef = try $ do
         x <- label
-        char '#'
+        _ <- char '#'
         return $ Label (LabelRef x)
 
 simpleDatum :: Parser IntrikyType
@@ -62,18 +69,18 @@ list = normalList <|> dottedList
   where
     normalList = parens $ do
         xs <- many datum
-        return undefined -- TODO $ foldr Pair Null (reverse xs)
+        return (toList xs)
     dottedList = parens . try $ do
         items <- many1 datum
         dotToken
         final <- datum
-        return undefined -- TODO $ foldr Pair final (reverse items)
+        return (toList' items final)
 
 abbreviation :: Parser IntrikyType
 abbreviation = try $ do
     x <- abbrevPrefix
     y <- datum
-    return (Pair x (Pair y Null))
+    return $ toList [x, y]
 
 abbrevPrefix :: Parser IntrikyType
 abbrevPrefix = choice
@@ -88,7 +95,62 @@ vector = try $ do
     vectorToken
     xs <- many datum
     rParenToken
-    return undefined -- TODO
+    return $ Vector' (fromList xs)
 
 label :: Parser Integer
 label = try (char '#' >> uinteger 10)
+
+{- 7.1.3. Expressions -}
+
+expression :: Parser IntrikyType
+expression = choice
+    [ symbolToken
+    , literal
+    , procedureCall
+--    , lambdaExpression
+--    , conditional
+--    , assignment
+--    , derivedExpression
+--    , macroUse
+--    , macroBlock
+--    , includer
+    ]
+
+literal :: Parser IntrikyType
+literal = quotation <|> selfEvaluating
+
+selfEvaluating :: Parser IntrikyType
+selfEvaluating = choice
+    [ boolToken
+    , numberToken
+    , vector
+    , charToken
+    , stringToken
+    , bytevector
+    ]
+
+quotation :: Parser IntrikyType
+quotation = quoteAbbr <|> fullQuote
+  where
+    quote x = toList [Symbol "quote", x]
+    quoteAbbr = try $ do
+        quoteToken
+        x <- datum
+        return (quote x)
+    fullQuote = try $ do
+        lParenToken
+        x <- symbolToken
+        case x of
+            (Symbol "quote") -> do
+                y <- datum
+                rParenToken
+                return (quote y)
+            _ -> fail "expecting (Symbol \"quote\")"
+
+procedureCall :: Parser IntrikyType
+procedureCall = try $ do
+    lParenToken
+    x <- expression
+    ys <- many expression
+    rParenToken
+    return $ toList (x:ys)
