@@ -1,44 +1,75 @@
-module Intriky.Lexer where
+module Intriky.Lexer
+    ( symbolToken
+    , boolToken
+    , numberToken
+    , charToken
+    , stringToken
+    , lParenToken 
+    , rParenToken
+    , vectorToken
+    , bytevectorToken
+    , quoteToken
+    , backtickToken
+    , commaToken
+    , seqCommaToken
+    , dotToken
+    ) where
 
-import Control.Monad   (liftM)
-import Data.Char       (chr, ord, isDigit, toLower)
-import Data.Ratio      ((%), numerator, denominator)
+import Control.Monad (liftM)
+import Data.Char     (chr, ord, isDigit, toLower)
+import Data.Ratio    ((%), numerator, denominator)
+import Data.Text     (pack)
 import Text.ParserCombinators.Parsec hiding
-                       (digit, letter, hexDigit, label, token)
+                     (digit, letter, hexDigit, label, token)
 
 import Intriky.Types
 
-data IntrikyToken
-    = IdentTok String
-    | BoolTok Bool
-    | NumberTok IntrikyNumber
-    | CharTok Char
-    | StringTok String
-    | LParenTok
-    | RParenTok
-    | VectorTok
-    | BytevectorTok
-    | QuoteTok
-    | BacktickTok
-    | CommaTok
-    | SeqCommaTok
-    | DotTok
 
-instance Show IntrikyToken where
-    show (IdentTok x) = x
-    show (BoolTok x) = if x then "#t" else "#f"
-    show (NumberTok _) = "<Number>"
-    show (CharTok x) = "'" ++ [x] ++ "'"
-    show (StringTok x) = show x
-    show LParenTok = "("
-    show RParenTok = ")"
-    show VectorTok = "#("
-    show BytevectorTok = "#u8("
-    show QuoteTok = "'"
-    show BacktickTok = "`"
-    show CommaTok = ","
-    show SeqCommaTok = ",@"
-    show DotTok = "."
+symbolToken :: Parser IntrikySymbol
+symbolToken = token (liftM (Symbol . pack) identifier)
+
+boolToken :: Parser IntrikyBoolean
+boolToken = token boolean
+
+numberToken :: Parser IntrikyNumber
+numberToken = token number
+
+charToken :: Parser IntrikyChar
+charToken = token character
+
+stringToken :: Parser IntrikyString
+stringToken = token (liftM (String' . pack) string')
+
+lParenToken :: Parser ()
+lParenToken = token $ char '(' >> return ()
+
+rParenToken :: Parser()
+rParenToken = token $ char ')' >> return ()
+
+vectorToken :: Parser ()
+vectorToken = token $ tryString "#(" >> return ()
+
+bytevectorToken :: Parser ()
+bytevectorToken = token $ tryString "#u8(" >> return ()
+
+quoteToken :: Parser ()
+quoteToken = token $ char '\'' >> return ()
+
+backtickToken :: Parser ()
+backtickToken = token $ char '`' >> return ()
+
+commaToken :: Parser ()
+commaToken = token $ char ',' >> return ()
+
+seqCommaToken :: Parser ()
+seqCommaToken = token $ tryString ",@" >> return ()
+
+dotToken :: Parser ()
+dotToken = token $ char '.' >> return ()
+
+-- Intertoken space can occur on either side of a token.
+token :: Parser a -> Parser a
+token = try . (between intertokenSpace intertokenSpace)
 
 -- Simple data type to help parse numbers.
 data Exactness = E | I
@@ -58,27 +89,6 @@ readInteger r = readInteger' . reverse
 -- Attempt to parse a string without consuming any input.
 tryString :: String -> Parser String
 tryString = try . string
-
-tokenize :: Parser [IntrikyToken]
-tokenize = many $ try (intertokenSpace >> token)
-
-token :: Parser IntrikyToken
-token = choice
-    [ identifier
-    , boolean
-    , liftM NumberTok number
-    , character
-    , string'
-    , (char '('         >> return LParenTok)
-    , (char ')'         >> return RParenTok)
-    , (tryString "#("   >> return VectorTok)
-    , (tryString "#u8(" >> return BytevectorTok)
-    , (char '\''        >> return QuoteTok)
-    , (char '`'         >> return BacktickTok)
-    , (char ','         >> return CommaTok)
-    , (tryString ",@"   >> return SeqCommaTok)
-    , (char '.'         >> return DotTok)
-    ]
 
 delimiter :: Parser Char
 delimiter = choice [whitespace, verticalLine, oneOf "()\";"]
@@ -137,18 +147,14 @@ atmosphere = choice
 intertokenSpace :: Parser ()
 intertokenSpace = many atmosphere >> return ()
 
-identifier :: Parser IntrikyToken
+identifier :: Parser String
 identifier = choice [regular, vert, peculiarIdentifier]
   where
     regular = try $ do
         x <- initial
         xs <- many subsequent
-        return $ IdentTok (x:xs)
-    vert = try $ do
-        _ <- verticalLine
-        xs <- many symbolElement
-        _ <- verticalLine
-        return (IdentTok xs)
+        return (x:xs)
+    vert = between verticalLine verticalLine (many symbolElement)
 
 initial :: Parser Char
 initial = letter <|> specialInitial
@@ -193,8 +199,8 @@ mnemonicEscape = choice
     , tryString "\\r" >> return '\r'
     ]
  
-peculiarIdentifier :: Parser IntrikyToken
-peculiarIdentifier = liftM IdentTok $ choice [plusMinus, noDot, withDot]
+peculiarIdentifier :: Parser String
+peculiarIdentifier = choice [plusMinus, noDot, withDot]
   where
     plusMinus = liftM return explicitSign
     noDot = try $ do
@@ -224,17 +230,17 @@ symbolElement = choice
     , try (string "\\|" >> char '|')
     ]
 
-boolean :: Parser IntrikyToken
-boolean = liftM BoolTok (true <|> false)
+boolean :: Parser IntrikyBoolean
+boolean = true <|> false
   where
     true =  (tryString "#true" <|> tryString "#t")  >> return True
     false = (tryString "#false" <|> tryString "#f") >> return False
 
-character :: Parser IntrikyToken
+character :: Parser IntrikyChar
 character = choice
-    [ tryString "#\\" >> liftM CharTok anyChar
-    , tryString "#\\" >> liftM CharTok characterName
-    , tryString "#\\x" >> liftM (CharTok . chr) hexScalarValue
+    [ tryString "#\\" >> anyChar
+    , tryString "#\\" >> characterName
+    , tryString "#\\x" >> liftM chr hexScalarValue
     ]
 
 characterName :: Parser Char
@@ -250,8 +256,8 @@ characterName = choice
     , tryString "tab"       >> return '\t'
     ]
 
-string' :: Parser IntrikyToken
-string' = liftM StringTok $ between q q (many stringElement)
+string' :: Parser String
+string' = between q q (many stringElement)
   where q = char '"'
  
 stringElement :: Parser Char
