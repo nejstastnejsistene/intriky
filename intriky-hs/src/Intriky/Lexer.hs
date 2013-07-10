@@ -53,17 +53,17 @@ vectorToken = token $ tryString "#(" >> return ()
 bytevectorToken :: Parser ()
 bytevectorToken = token $ tryString "#u8(" >> return ()
 
-quoteToken :: Parser ()
-quoteToken = token $ char '\'' >> return ()
+quoteToken :: Parser IntrikyType
+quoteToken = token $ char '\'' >> return (Symbol "quote")
 
-backtickToken :: Parser ()
-backtickToken = token $ char '`' >> return ()
+backtickToken :: Parser IntrikyType 
+backtickToken = token $ char '`' >> return (Symbol "quasiquote")
 
-commaToken :: Parser ()
-commaToken = token $ char ',' >> return ()
+commaToken :: Parser IntrikyType
+commaToken = token $ char ',' >> return (Symbol "unquote")
 
-seqCommaToken :: Parser ()
-seqCommaToken = token $ tryString ",@" >> return ()
+seqCommaToken :: Parser IntrikyType
+seqCommaToken = token $ tryString ",@" >> return (Symbol "unquote-splicing")
 
 dotToken :: Parser ()
 dotToken = token $ char '.' >> return ()

@@ -1,6 +1,6 @@
 module Intriky.Parser where
 
-import           Control.Monad   (liftM)
+import           Control.Monad   (liftM, liftM2)
 import qualified Data.ByteString as B
 import           Data.Ratio      (numerator, denominator)
 import qualified Data.Text       as T
@@ -11,15 +11,23 @@ import           Text.ParserCombinators.Parsec hiding (label)
 import Intriky.Lexer
 import Intriky.Types
 
+-- Wrap something in parentheses.
 parens :: Parser a -> Parser a
 parens = between lParenToken rParenToken
 
+-- Convert a Haskell list into a Scheme list.
 toList :: [IntrikyType] -> IntrikyType
 toList xs = toList' xs Null
 
+-- Convert a Haskell list into a Scheme list with an explicit final value.
 toList' :: [IntrikyType] -> IntrikyType -> IntrikyType
 toList' xs y = foldr Pair y xs
 
+-- Parse a list of parsers into a Scheme list.
+seqList :: [Parser IntrikyType] -> Parser IntrikyType
+seqList = liftM toList . sequence
+
+-- Match a symbol of the given value.
 symbol :: T.Text -> Parser IntrikyType
 symbol x = do
     sym <- symbolToken
@@ -78,10 +86,8 @@ compoundDatum = list <|> vector <|> abbreviation
 list :: Parser IntrikyType
 list = normalList <|> dottedList
   where
-    normalList = parens $ do
-        xs <- many datum
-        return (toList xs)
-    dottedList = parens . try $ do
+    normalList = try . parens $ liftM toList (many datum)
+    dottedList = try . parens $ do
         items <- many1 datum
         dotToken
         final <- datum
@@ -94,12 +100,7 @@ abbreviation = try $ do
     return $ toList [x, y]
 
 abbrevPrefix :: Parser IntrikyType
-abbrevPrefix = choice
-    [ quoteToken    >> return (Symbol "quote")
-    , backtickToken >> return (Symbol "quasiquote")
-    , commaToken    >> return (Symbol "unquote")
-    , seqCommaToken >> return (Symbol "unquote-splicing")
-    ]
+abbrevPrefix = choice [quoteToken, backtickToken, commaToken, seqCommaToken]
 
 vector :: Parser IntrikyType
 vector = try $ do
@@ -143,36 +144,20 @@ selfEvaluating = choice
 quotation :: Parser IntrikyType
 quotation = quoteAbbr <|> fullQuote
   where
-    quoteAbbr = try $ do
-        quoteToken
-        x <- datum
-        return $ toList [Symbol "quote", x]
-    fullQuote = try . parens $ do
-        quote <- symbol "quote"
-        y <- datum
-        return $ toList [quote, y]
+    quoteAbbr = try $ seqList [quoteToken, datum]
+    fullQuote = try . parens $ seqList [symbol "quote", datum]
 
 procedureCall :: Parser IntrikyType
-procedureCall = try . parens $ do
-    x <- expression       -- operator
-    ys <- many expression -- many operaand
-    return $ toList (x:ys)
+procedureCall = try . parens $ liftM toList (many1 expression)
 
 lambdaExpression :: Parser IntrikyType
-lambdaExpression = try . parens $ do
-    lambda <- symbol "lambda"
-    x <- formals
-    y <- body
-    return $ toList [lambda, x, y]
+lambdaExpression = try . parens $ seqList [symbol "lambda", formals, body]
 
 formals :: Parser IntrikyType
 formals = choice [regList, symbolToken, dottedList]
   where
     regList = try . parens $ liftM toList (many symbolToken)
-    dottedList = try . parens $ do
-        xs <- many1 symbolToken
-        y <- symbolToken
-        return (toList' xs y)
+    dottedList = try . parens $ liftM2 toList' (many1 symbolToken) symbolToken
     
 body :: Parser IntrikyType
 body = try $ do
@@ -197,11 +182,7 @@ conditional = try . parens $ do
     alternate = liftM (maybe [] return) (optionMaybe expression)
 
 assignment :: Parser IntrikyType
-assignment = try . parens $ do
-    set <- symbol "set!"
-    x <- symbolToken
-    y <- expression
-    return $ toList [set, x, y]
+assignment = try . parens $ seqList [symbol "set!", symbolToken, expression]
 
 definition :: Parser IntrikyType
 definition = undefined
