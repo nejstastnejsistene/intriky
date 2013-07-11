@@ -23,9 +23,18 @@ toList xs = toList' xs Null
 toList' :: [IntrikyType] -> IntrikyType -> IntrikyType
 toList' xs y = foldr Pair y xs
 
+toListM :: Monad m => m [IntrikyType] -> m IntrikyType
+toListM = liftM toList
+
 -- Parse a list of parsers into a Scheme list.
 seqList :: [Parser IntrikyType] -> Parser IntrikyType
-seqList = liftM toList . sequence
+seqList = parens . seqList'
+
+seqList' :: [Parser IntrikyType] -> Parser IntrikyType
+seqList' = try . toListM . sequence
+
+option' :: Parser a -> Parser [a]
+option' = liftM (maybe [] return) . optionMaybe
 
 -- Match a symbol of the given value.
 symbol :: T.Text -> Parser IntrikyType
@@ -86,7 +95,7 @@ compoundDatum = list <|> vector <|> abbreviation
 list :: Parser IntrikyType
 list = normalList <|> dottedList
   where
-    normalList = try . parens $ liftM toList (many datum)
+    normalList = try . parens $ toListM (many datum)
     dottedList = try . parens $ do
         items <- many1 datum
         dotToken
@@ -122,10 +131,10 @@ expression = choice
     , lambdaExpression
     , conditional
     , assignment
---    , derivedExpression
---    , macroUse
---    , macroBlock
---    , includer
+    , derivedExpression
+    , macroUse
+    , macroBlock
+    , includer
     ]
 
 literal :: Parser IntrikyType
@@ -144,19 +153,19 @@ selfEvaluating = choice
 quotation :: Parser IntrikyType
 quotation = quoteAbbr <|> fullQuote
   where
-    quoteAbbr = try $ seqList [quoteToken, datum]
-    fullQuote = try . parens $ seqList [symbol "quote", datum]
+    quoteAbbr = seqList' [quoteToken, datum]
+    fullQuote = seqList [symbol "quote", datum]
 
 procedureCall :: Parser IntrikyType
-procedureCall = try . parens $ liftM toList (many1 expression)
+procedureCall = try $ toListM (many1 expression)
 
 lambdaExpression :: Parser IntrikyType
-lambdaExpression = try . parens $ seqList [symbol "lambda", formals, body]
+lambdaExpression = seqList [symbol "lambda", formals, body]
 
 formals :: Parser IntrikyType
 formals = choice [regList, symbolToken, dottedList]
   where
-    regList = try . parens $ liftM toList (many symbolToken)
+    regList = try . parens $ toListM (many symbolToken)
     dottedList = try . parens $ liftM2 toList' (many1 symbolToken) symbolToken
     
 body :: Parser IntrikyType
@@ -167,22 +176,122 @@ body = try $ do
 
 sequence' :: Parser IntrikyType
 sequence' = try $ do
-    xs <- many expression -- many command
+    xs <- many expression
     y <- expression
     return $ toList (xs ++ [y])
 
 conditional :: Parser IntrikyType
 conditional = try . parens $ do
     if' <- symbol "if"
-    x <- expression -- test
-    y <- expression -- consequent
-    z <- alternate
+    x <- expression
+    y <- expression
+    z <- option' expression
     return (toList $ [if', x, y] ++ z)
-  where
-    alternate = liftM (maybe [] return) (optionMaybe expression)
 
 assignment :: Parser IntrikyType
-assignment = try . parens $ seqList [symbol "set!", symbolToken, expression]
+assignment = seqList [symbol "set!", symbolToken, expression]
+
+derivedExpression :: Parser IntrikyType
+derivedExpression = choice $ quasiquotation : map (try . toListM)
+    [ do x <- symbol "cond"
+         xs <- many1 condClause 
+         return (x:xs)
+    , do x <- symbol "cond"
+         xs <- many condClause
+         e <- elseClause
+         return (x:xs ++ [e])
+    , do x <- symbol "case"
+         y <- expression
+         zs <- many1 caseClause
+         return (x:y:zs)
+    , do x <- symbol "case"
+         y <- expression
+         zs <- many caseClause
+         e <- elseClause <|> elseRecipient
+         return (x:y:zs ++ [e])
+    , liftM2 (:) (symbol "and") (many expression)
+    , liftM2 (:) (symbol "or") (many expression)
+    , sequence [symbol "when", expression, sequence']
+    , sequence [symbol "unless", expression, sequence']
+    , sequence [lets, toListM (many bindingSpec), body]
+    , sequence [symbol "let", symbolToken, toListM (many bindingSpec), body]
+    , sequence [letValues, toListM (many mvBindingSpec), body]
+    , sequence [symbol "begin", sequence']
+    , do x <- symbol "do"
+         y <- toListM (many iterationSpec)
+         z <- toListM $ liftM2 (:) expression (option' sequence')
+         zs <- many expression
+         return (x:y:z:zs)
+    , sequence [delays, expression]
+    , sequence [symbol "parameterize", toListM (many exprPair), body]
+    , sequence [symbol "guard", toListM (many guardSpec), body]
+    , liftM2 (:) (symbol "case-lambda") (many caseLambdaClause)
+    ] 
+  where
+    elseClause = seqList [symbol "else", sequence']
+    elseRecipient = seqList [symbol "else", symbol "=>", expression]
+    lets = choice $ map symbol ["let", "let*", "letrec", "letrec*"]
+    letValues = symbol "let-values" <|> symbol "let*-values"
+    delays = symbol "delay" <|> symbol "delay-force"
+    exprPair = seqList [expression, expression]
+    guardSpec = toListM $ liftM2 (:) symbolToken (many condClause)
+
+condClause :: Parser IntrikyType
+condClause = choice $ map seqList
+    [ [expression, sequence']
+    , [expression]
+    , [expression, symbol "=>", expression]
+    ]
+
+caseClause :: Parser IntrikyType
+caseClause = choice $ map seqList
+    [ [toListM (many datum), sequence']
+    , [toListM (many datum), symbol "=>", expression]
+    ]
+
+bindingSpec :: Parser IntrikyType
+bindingSpec = seqList [symbolToken, expression]
+
+mvBindingSpec :: Parser IntrikyType
+mvBindingSpec = seqList [formals, expression]
+
+iterationSpec :: Parser IntrikyType
+iterationSpec = toListM $ do
+    x <- symbolToken
+    y <- expression
+    z <- option' expression
+    return (x:y:z)
+
+caseLambdaClause :: Parser IntrikyType
+caseLambdaClause = seqList [formals, body]
+
+macroUse :: Parser IntrikyType
+macroUse = toListM $ liftM2 (:) symbolToken (many datum)
+
+macroBlock :: Parser IntrikyType
+macroBlock = seqList [letSyntax, toListM (many syntaxSpec), body]
+  where
+    letSyntax = symbol "let-syntax" <|> symbol "letrec-syntax"
+
+syntaxSpec :: Parser IntrikyType
+syntaxSpec = seqList [symbolToken, transformerSpec]
+
+includer :: Parser IntrikyType
+includer = toListM $ liftM2 (:) include (many1 stringToken)
+  where
+    include = symbol "include" <|> symbol "include-ci"
+
+{- 7.1.4 Quasiquotations -}
+
+quasiquotation :: Parser IntrikyType
+quasiquotation = undefined
+
+{- 7.1.5 Transformers -}
+
+transformerSpec :: Parser IntrikyType
+transformerSpec = undefined
+
+{- 7.1.6 Programs and definitions -}
 
 definition :: Parser IntrikyType
 definition = undefined
