@@ -1,6 +1,6 @@
 module Intriky.Parser where
 
-import           Control.Monad   (liftM, liftM2)
+import           Control.Monad   (liftM, liftM2, replicateM)
 import qualified Data.ByteString as B
 import           Data.Ratio      (numerator, denominator)
 import qualified Data.Text       as T
@@ -341,5 +341,51 @@ transformerSpec = undefined
 
 {- 7.1.6 Programs and definitions -}
 
+program :: Parser [IntrikyType]
+program = liftM2 (++) (many1 importDeclaration) (many1 commandOrDefinition)
+
+commandOrDefinition :: Parser IntrikyType
+commandOrDefinition = choice
+    [ expression
+    , definition
+    , toListM $ liftM2 (:) (symbol "begin") (many1 commandOrDefinition)
+    ]
+
 definition :: Parser IntrikyType
-definition = undefined
+definition = choice
+    [ seqList [symbol "define", symbolToken, expression]
+    , seqList [symbol "define", liftM2 Pair symbolToken defFormals, body]
+    , syntaxDef
+    , seqList [symbol "define-values", formals, body]
+    , do x <- symbol "define-record-type"
+         ys <- sequence [symbolToken, constructor, symbolToken]
+         zs <- many fieldSpec
+         return $ toList (x:ys ++ zs)
+    , toListM $ liftM2 (:) (symbol "begin") (many fieldSpec)
+    ]
+
+defFormals :: Parser IntrikyType
+defFormals = choice
+    [ toListM (many symbolToken)
+    , do xs <- many symbolToken
+         dotToken
+         y <- symbolToken
+         return $ toList' xs y      
+    ]
+
+constructor :: Parser IntrikyType
+constructor = toListM $ liftM2 (:) symbolToken (many symbolToken)
+
+fieldSpec :: Parser IntrikyType
+fieldSpec = choice $ map toListM
+    [ replicateM 2 symbolToken
+    , replicateM 3 symbolToken
+    ]
+
+syntaxDef :: Parser IntrikyType
+syntaxDef = seqList [symbol "define-syntax", symbolToken, transformerSpec]
+
+{- 7.1.7 Libraries -}
+
+importDeclaration :: Parser IntrikyType
+importDeclaration = undefined
