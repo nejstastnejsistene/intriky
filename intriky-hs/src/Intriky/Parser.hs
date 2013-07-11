@@ -151,10 +151,10 @@ selfEvaluating = choice
     ]
 
 quotation :: Parser IntrikyType
-quotation = quoteAbbr <|> fullQuote
-  where
-    quoteAbbr = seqList' [quoteToken, datum]
-    fullQuote = seqList [symbol "quote", datum]
+quotation = choice
+    [ seqList' [quoteToken, datum]
+    , seqList [symbol "quote", datum]
+    ]
 
 procedureCall :: Parser IntrikyType
 procedureCall = try $ toListM (many1 expression)
@@ -284,7 +284,55 @@ includer = toListM $ liftM2 (:) include (many1 stringToken)
 {- 7.1.4 Quasiquotations -}
 
 quasiquotation :: Parser IntrikyType
-quasiquotation = undefined
+quasiquotation = quasiquotation' 1
+
+quasiquotation' :: Int -> Parser IntrikyType
+quasiquotation' d = choice
+    [ seqList' [backtickToken, qqTemplate d]
+    , seqList [symbol "quasiquote", qqTemplate d]
+    ]
+
+qqTemplate :: Int -> Parser IntrikyType
+qqTemplate 0 = expression
+qqTemplate d = choice
+    [ simpleDatum
+    , listQQTemplate d
+    , vectorQQTemplate d
+    , unquotation d
+    ]
+
+listQQTemplate :: Int -> Parser IntrikyType
+listQQTemplate d = choice
+    [ toListM $ many (qqTemplateOrSplice d)
+    , try . parens $ do xs <- many1 (qqTemplateOrSplice d)
+                        dotToken
+                        y <- qqTemplate d
+                        return $ toList' xs y
+    , seqList' [backtickToken, qqTemplate d]
+    , quasiquotation' (d + 1)
+    ]
+
+vectorQQTemplate :: Int -> Parser IntrikyType
+vectorQQTemplate d = try $ do
+    vectorToken
+    xs <- many (qqTemplateOrSplice d)
+    rParenToken
+    return $ Vector' (fromList xs)
+
+unquotation :: Int -> Parser IntrikyType
+unquotation d = choice
+    [ seqList' [commaToken, qqTemplate (d - 1)]
+    , seqList [symbol "unquote", qqTemplate (d - 1)]
+    ]
+
+qqTemplateOrSplice :: Int -> Parser IntrikyType
+qqTemplateOrSplice d = qqTemplate d <|> splicingUnquotation d
+
+splicingUnquotation :: Int -> Parser IntrikyType
+splicingUnquotation d = choice
+    [ seqList' [seqCommaToken, qqTemplate (d - 1)]
+    , seqList [symbol "unquote-splicing", qqTemplate (d - 1)]
+    ]
 
 {- 7.1.5 Transformers -}
 
