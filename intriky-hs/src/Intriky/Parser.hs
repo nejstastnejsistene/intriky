@@ -6,7 +6,7 @@ import           Data.Ratio      (numerator, denominator)
 import qualified Data.Text       as T
 import           Data.Vector     (fromList)
 import           Data.Word       (Word8)
-import           Text.ParserCombinators.Parsec hiding (label)
+import           Text.ParserCombinators.Parsec hiding (label, optional)
 
 import Intriky.Lexer
 import Intriky.Types
@@ -23,8 +23,8 @@ toList xs = toList' xs Null
 toList' :: [IntrikyType] -> IntrikyType -> IntrikyType
 toList' xs y = foldr Pair y xs
 
-toListM :: Monad m => m [IntrikyType] -> m IntrikyType
-toListM = liftM toList
+toListM :: Parser [IntrikyType] -> Parser IntrikyType
+toListM = liftM toList . try . parens
 
 -- Parse a list of parsers into a Scheme list.
 seqList :: [Parser IntrikyType] -> Parser IntrikyType
@@ -165,7 +165,7 @@ lambdaExpression = seqList [symbol "lambda", formals, body]
 formals :: Parser IntrikyType
 formals = choice [regList, symbolToken, dottedList]
   where
-    regList = try . parens $ toListM (many symbolToken)
+    regList = try $ toListM (many symbolToken)
     dottedList = try . parens $ liftM2 toList' (many1 symbolToken) symbolToken
     
 body :: Parser IntrikyType
@@ -193,22 +193,22 @@ assignment = seqList [symbol "set!", symbolToken, expression]
 
 derivedExpression :: Parser IntrikyType
 derivedExpression = choice $ quasiquotation : map (try . toListM)
-    [ do x <- symbol "cond"
-         xs <- many1 condClause 
-         return (x:xs)
-    , do x <- symbol "cond"
-         xs <- many condClause
-         e <- elseClause
-         return (x:xs ++ [e])
-    , do x <- symbol "case"
-         y <- expression
-         zs <- many1 caseClause
-         return (x:y:zs)
-    , do x <- symbol "case"
-         y <- expression
-         zs <- many caseClause
-         e <- elseClause <|> elseRecipient
-         return (x:y:zs ++ [e])
+    [ try $ do x <- symbol "cond"
+               xs <- many1 condClause 
+               return (x:xs)
+    , try $ do x <- symbol "cond"
+               xs <- many condClause
+               e <- elseClause
+               return (x:xs ++ [e])
+    , try $ do x <- symbol "case"
+               y <- expression
+               zs <- many1 caseClause
+               return (x:y:zs)
+    , try $ do x <- symbol "case"
+               y <- expression
+               zs <- many caseClause
+               e <- elseClause <|> elseRecipient
+               return (x:y:zs ++ [e])
     , liftM2 (:) (symbol "and") (many expression)
     , liftM2 (:) (symbol "or") (many expression)
     , sequence [symbol "when", expression, sequence']
@@ -217,11 +217,11 @@ derivedExpression = choice $ quasiquotation : map (try . toListM)
     , sequence [symbol "let", symbolToken, toListM (many bindingSpec), body]
     , sequence [letValues, toListM (many mvBindingSpec), body]
     , sequence [symbol "begin", sequence']
-    , do x <- symbol "do"
-         y <- toListM (many iterationSpec)
-         z <- toListM $ liftM2 (:) expression (option' sequence')
-         zs <- many expression
-         return (x:y:z:zs)
+    , try $ do x <- symbol "do"
+               y <- toListM (many iterationSpec)
+               z <- toListM $ liftM2 (:) expression (option' sequence')
+               zs <- many expression
+               return (x:y:z:zs)
     , sequence [delays, expression]
     , sequence [symbol "parameterize", toListM (many exprPair), body]
     , sequence [symbol "guard", toListM (many guardSpec), body]
@@ -336,8 +336,86 @@ splicingUnquotation d = choice
 
 {- 7.1.5 Transformers -}
 
+asdf :: [Parser [IntrikyType]] -> Parser IntrikyType
+asdf = try . parens . liftM (toList . concat) . sequence
+
+symbol' :: T.Text -> Parser [IntrikyType]
+symbol' x = sequence [symbol x]
+
+toListM' :: Parser [IntrikyType] -> Parser [IntrikyType]
+toListM' x = sequence [liftM toList x]
+
+optional :: Parser IntrikyType -> Parser [IntrikyType]
+optional = liftM (maybe [] return) . optionMaybe
+
 transformerSpec :: Parser IntrikyType
-transformerSpec = undefined
+transformerSpec = asdf
+    [ symbol' "syntax-rules"
+    , optional symbolToken
+    , toListM' (many symbolToken)
+    , many syntaxRule
+    ]
+
+syntaxRule :: Parser IntrikyType
+syntaxRule = seqList [pattern, template]
+
+pattern :: Parser IntrikyType
+pattern = choice
+    [ patternIdentifier
+    , symbol "_"
+    , toListM (many pattern)
+    , try . parens $ do xs <- many1 pattern
+                        dotToken
+                        y <- pattern
+                        return $ toList' xs y
+    , toListM ppep
+    , try . parens $ do xs <- ppep
+                        dotToken
+                        y <- pattern
+                        return $ toList' xs y
+    , try $ vectorToken >> liftM (Vector' . fromList) (many pattern <|> ppep)
+    ]
+  where
+    ppep = try $ do xs <- many pattern
+                    y <- pattern
+                    e <- ellipsis
+                    zs <- many pattern
+                    return (xs ++ y:e:zs)
+
+patternDatum :: Parser IntrikyType
+patternDatum = choice
+    [ stringToken
+    , charToken
+    , boolToken
+    , numberToken
+    ]
+
+template :: Parser IntrikyType
+template = choice
+    [ patternIdentifier
+    , toListM (liftM concat $ many templateElement)
+    , try . parens $ do xs <- many1 templateElement
+                        dotToken
+                        y <- template
+                        return $ toList' (concat xs) y
+    , try $ do vectorToken
+               xs <- many templateElement
+               rParenToken
+               return $ Vector' $ fromList  (concat xs)
+    , patternDatum
+    ] 
+  where
+    templateElement = sequence [template] <|> sequence [template, ellipsis]
+
+patternIdentifier :: Parser IntrikyType
+patternIdentifier = do
+    x <- symbolToken
+    case x of
+        Symbol "..." -> fail "expecting any identifier except \"...\""
+        _ -> return x
+
+ellipsis :: Parser IntrikyType
+ellipsis = undefined
 
 {- 7.1.6 Programs and definitions -}
 
@@ -357,20 +435,20 @@ definition = choice
     , seqList [symbol "define", liftM2 Pair symbolToken defFormals, body]
     , syntaxDef
     , seqList [symbol "define-values", formals, body]
-    , do x <- symbol "define-record-type"
-         ys <- sequence [symbolToken, constructor, symbolToken]
-         zs <- many fieldSpec
-         return $ toList (x:ys ++ zs)
+    , try $ do x <- symbol "define-record-type"
+               ys <- sequence [symbolToken, constructor, symbolToken]
+               zs <- many fieldSpec
+               return $ toList (x:ys ++ zs)
     , toListM $ liftM2 (:) (symbol "begin") (many fieldSpec)
     ]
 
 defFormals :: Parser IntrikyType
 defFormals = choice
     [ toListM (many symbolToken)
-    , do xs <- many symbolToken
-         dotToken
-         y <- symbolToken
-         return $ toList' xs y      
+    , try $ do xs <- many symbolToken
+               dotToken
+               y <- symbolToken
+               return $ toList' xs y      
     ]
 
 constructor :: Parser IntrikyType
