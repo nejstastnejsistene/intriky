@@ -24,14 +24,18 @@ toList' :: [IntrikyType] -> IntrikyType -> IntrikyType
 toList' xs y = foldr Pair y xs
 
 toListM :: Parser [IntrikyType] -> Parser IntrikyType
-toListM = liftM toList . try . parens
+toListM = toListM' . try . parens
+
+toListM' :: Parser [IntrikyType] -> Parser IntrikyType
+toListM' = liftM toList
 
 -- Parse a list of parsers into a Scheme list.
 seqList :: [Parser IntrikyType] -> Parser IntrikyType
 seqList = parens . seqList'
 
+-- Like seqList but without parens.
 seqList' :: [Parser IntrikyType] -> Parser IntrikyType
-seqList' = try . toListM . sequence
+seqList' = toListM' . sequence
 
 option' :: Parser a -> Parser [a]
 option' = liftM (maybe [] return) . optionMaybe
@@ -152,7 +156,10 @@ selfEvaluating = choice
 
 quotation :: Parser IntrikyType
 quotation = choice
-    [ seqList' [quoteToken, datum]
+    [ try $ do
+        x <- quoteToken
+        y <- datum
+        return $ toList [x, y]
     , seqList [symbol "quote", datum]
     ]
 
@@ -342,8 +349,8 @@ asdf = try . parens . liftM (toList . concat) . sequence
 symbol' :: T.Text -> Parser [IntrikyType]
 symbol' x = sequence [symbol x]
 
-toListM' :: Parser [IntrikyType] -> Parser [IntrikyType]
-toListM' x = sequence [liftM toList x]
+toListM'' :: Parser [IntrikyType] -> Parser [IntrikyType]
+toListM'' x = sequence [liftM toList x]
 
 optional :: Parser IntrikyType -> Parser [IntrikyType]
 optional = liftM (maybe [] return) . optionMaybe
@@ -352,7 +359,7 @@ transformerSpec :: Parser IntrikyType
 transformerSpec = asdf
     [ symbol' "syntax-rules"
     , optional symbolToken
-    , toListM' (many symbolToken)
+    , toListM'' (many symbolToken)
     , many syntaxRule
     ]
 

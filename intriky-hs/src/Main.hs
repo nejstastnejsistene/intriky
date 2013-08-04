@@ -3,6 +3,7 @@ import qualified Data.Text as T
 import Data.Char (chr)
 import Text.ParserCombinators.Parsec (parse)
 
+--import Intriky.Lexer
 import Intriky.Parser
 import Intriky.Types
 
@@ -15,7 +16,7 @@ main = do
         Right (Bytevector x) -> putStrLn $ map (chr . fromIntegral) (B.unpack x)
         _ -> putStrLn "non-exhaustive pattern match blebleble"
 
-    let test2 = "'ahoj"
+    let test2 = "(quote ahoj)"
     case parse quotation "" test2 of
         Left err -> putStrLn (show err)
         Right (Pair (Symbol x) (Pair (Symbol y) Null))
